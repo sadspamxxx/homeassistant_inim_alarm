@@ -8,10 +8,13 @@ DOMAIN = "inim_alarm"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_SCAN_INTERVAL = "scan_interval"
-# Legacy scenario config (removed in v2.0 - now uses InsertAreas API)
-# CONF_ARM_AWAY_SCENARIO = "arm_away_scenario"
-# CONF_ARM_HOME_SCENARIO = "arm_home_scenario"
-# CONF_DISARM_SCENARIO = "disarm_scenario"
+# Optional scenario mapping for the main panel. When set, the corresponding
+# arm/disarm action activates that panel scenario instead of arming every area
+# the same way via InsertAreas. This lets Armed Home map to a partial/night
+# scenario distinct from Armed Away (total).
+CONF_ARM_AWAY_SCENARIO = "arm_away_scenario"
+CONF_ARM_HOME_SCENARIO = "arm_home_scenario"
+CONF_DISARM_SCENARIO = "disarm_scenario"
 CONF_USER_CODE = "user_code"
 
 # SIA-IP configuration

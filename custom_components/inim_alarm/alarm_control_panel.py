@@ -28,6 +28,9 @@ from .const import (
     ATTR_MODEL,
     ATTR_SERIAL_NUMBER,
     ATTR_VOLTAGE,
+    CONF_ARM_AWAY_SCENARIO,
+    CONF_ARM_HOME_SCENARIO,
+    CONF_DISARM_SCENARIO,
     CONF_SCAN_INTERVAL,
     CONF_USER_CODE,
     DOMAIN,
@@ -141,6 +144,17 @@ class InimAlarmControlPanel(
         self._pending_state: AlarmControlPanelState | None = None
         self._armed_mode: str = "home"  # "home" or "away" - default to home
 
+    def _configured_scenario(self, conf_key: str) -> int | None:
+        """Return the scenario ID mapped to an action, or None if unset."""
+        value = self._options.get(conf_key)
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            _LOGGER.warning("Invalid scenario configured for %s: %r", conf_key, value)
+            return None
+
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
@@ -150,7 +164,7 @@ class InimAlarmControlPanel(
                 identifiers={(DOMAIN, str(self._device_id))},
                 manufacturer=MANUFACTURER,
             )
-        
+
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._device_id))},
             manufacturer=MANUFACTURER,
@@ -241,91 +255,82 @@ class InimAlarmControlPanel(
         
         return attrs
 
-    async def async_alarm_disarm(self, code: str | None = None) -> None:
-        """Send disarm command for all areas."""
-        if not self._user_code:
-            _LOGGER.error(
-                "Cannot disarm: No user code configured. "
-                "Reconfigure the integration to set the user code."
-            )
-            return
-        
-        if not self._area_ids:
-            _LOGGER.warning("No configured areas to disarm")
-            return
-        
+    async def _async_run_action(
+        self, action: str, conf_key: str, arm: bool
+    ) -> bool:
+        """Run an arm/disarm action via scenario (if mapped) or InsertAreas.
+
+        Returns True if a command was sent, False otherwise.
+        """
+        scenario_id = self._configured_scenario(conf_key)
+
         # Register that this command is from Home Assistant
         self.coordinator.register_ha_command(self._device_id, None)
-            
+
+        if scenario_id is not None:
+            _LOGGER.info(
+                "%s device %s via scenario %s", action, self._device_id, scenario_id
+            )
+            await self._api.activate_scenario(self._device_id, scenario_id)
+            return True
+
+        # Fallback: arm/disarm every configured area the same way
+        if not self._user_code:
+            _LOGGER.error(
+                "Cannot %s: configure a scenario in the integration options "
+                "or set the user code.",
+                action.lower(),
+            )
+            return False
+        if not self._area_ids:
+            _LOGGER.warning("No configured areas to %s", action.lower())
+            return False
+
         _LOGGER.info(
-            "Disarming all areas for device %s (areas: %s)", 
-            self._device_id, 
-            self._area_ids
+            "%s all areas for device %s (areas: %s)",
+            action,
+            self._device_id,
+            self._area_ids,
         )
-        await self._api.insert_areas(self._device_id, self._area_ids, self._user_code, arm=False)
+        await self._api.insert_areas(
+            self._device_id, self._area_ids, self._user_code, arm=arm
+        )
+        return True
+
+    async def async_alarm_disarm(self, code: str | None = None) -> None:
+        """Send disarm command for all areas."""
+        await self._async_run_action("Disarming", CONF_DISARM_SCENARIO, arm=False)
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
-        """Send arm home command for all areas (partial protection)."""
-        if not self._user_code:
-            _LOGGER.error(
-                "Cannot arm: No user code configured. "
-                "Reconfigure the integration to set the user code."
-            )
-            return
-        
-        if not self._area_ids:
-            _LOGGER.warning("No configured areas to arm")
-            return
-        
-        # Set pending state and armed mode
+        """Send arm home command (partial protection or mapped scenario)."""
         self._pending_state = AlarmControlPanelState.ARMING
         self._armed_mode = "home"
         self.async_write_ha_state()
-        
-        # Register that this command is from Home Assistant
-        self.coordinator.register_ha_command(self._device_id, None)
-            
-        _LOGGER.info(
-            "Arming HOME all areas for device %s (areas: %s)", 
-            self._device_id,
-            self._area_ids
-        )
-        await self._api.insert_areas(self._device_id, self._area_ids, self._user_code, arm=True)
-        
-        # Clear pending state after API call
+
+        if not await self._async_run_action(
+            "Arming HOME", CONF_ARM_HOME_SCENARIO, arm=True
+        ):
+            self._pending_state = None
+            self.async_write_ha_state()
+            return
+
         self._pending_state = None
         await self.coordinator.async_request_refresh()
 
     async def async_alarm_arm_away(self, code: str | None = None) -> None:
-        """Send arm away command for all areas (full protection)."""
-        if not self._user_code:
-            _LOGGER.error(
-                "Cannot arm: No user code configured. "
-                "Reconfigure the integration to set the user code."
-            )
-            return
-        
-        if not self._area_ids:
-            _LOGGER.warning("No configured areas to arm")
-            return
-        
-        # Set pending state and armed mode
+        """Send arm away command (full protection or mapped scenario)."""
         self._pending_state = AlarmControlPanelState.ARMING
         self._armed_mode = "away"
         self.async_write_ha_state()
-        
-        # Register that this command is from Home Assistant
-        self.coordinator.register_ha_command(self._device_id, None)
-            
-        _LOGGER.info(
-            "Arming AWAY all areas for device %s (areas: %s)", 
-            self._device_id,
-            self._area_ids
-        )
-        await self._api.insert_areas(self._device_id, self._area_ids, self._user_code, arm=True)
-        
-        # Clear pending state after API call
+
+        if not await self._async_run_action(
+            "Arming AWAY", CONF_ARM_AWAY_SCENARIO, arm=True
+        ):
+            self._pending_state = None
+            self.async_write_ha_state()
+            return
+
         self._pending_state = None
         await self.coordinator.async_request_refresh()
 

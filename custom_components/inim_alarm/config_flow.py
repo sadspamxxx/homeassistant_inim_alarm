@@ -14,9 +14,12 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import InimApi, InimApiError, InimAuthError
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, selector
 
 from .const import (
+    CONF_ARM_AWAY_SCENARIO,
+    CONF_ARM_HOME_SCENARIO,
+    CONF_DISARM_SCENARIO,
     CONF_ENABLE_SIA,
     CONF_SCAN_INTERVAL,
     CONF_SIA_ACCOUNT,
@@ -198,6 +201,30 @@ class InimAlarmOptionsFlow(config_entries.OptionsFlow):
             self.config_entry.data.get(CONF_SIA_ACCOUNT, ""),
         )
 
+        # Build the scenario list from the coordinator so users pick by name.
+        scenario_options = self._build_scenario_options()
+
+        scenario_schema: dict[Any, Any] = {}
+        if scenario_options:
+            scenario_selector = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=scenario_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+            for key in (
+                CONF_ARM_AWAY_SCENARIO,
+                CONF_ARM_HOME_SCENARIO,
+                CONF_DISARM_SCENARIO,
+            ):
+                current = self.config_entry.options.get(key)
+                field = (
+                    vol.Optional(key, default=current)
+                    if current is not None
+                    else vol.Optional(key)
+                )
+                scenario_schema[field] = scenario_selector
+
         options_schema = vol.Schema(
             {
                 vol.Required(
@@ -216,6 +243,7 @@ class InimAlarmOptionsFlow(config_entries.OptionsFlow):
                     CONF_SIA_ACCOUNT,
                     default=current_sia_account,
                 ): str,
+                **scenario_schema,
             }
         )
 
@@ -223,3 +251,28 @@ class InimAlarmOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=options_schema,
         )
+
+    def _build_scenario_options(self) -> list[selector.SelectOptionDict]:
+        """Return panel scenarios as selector options (value=id, label=name)."""
+        options: list[selector.SelectOptionDict] = []
+        seen: set[str] = set()
+        try:
+            coordinator = self.hass.data[DOMAIN][self.config_entry.entry_id]["coordinator"]
+            for device in coordinator.data.get("devices", []):
+                for scenario in device.get("scenarios", []):
+                    scenario_id = scenario.get("ScenarioId")
+                    if scenario_id is None:
+                        continue
+                    value = str(scenario_id)
+                    if value in seen:
+                        continue
+                    seen.add(value)
+                    options.append(
+                        selector.SelectOptionDict(
+                            value=value,
+                            label=scenario.get("Name", f"Scenario {scenario_id}"),
+                        )
+                    )
+        except (KeyError, AttributeError, TypeError):
+            pass
+        return options
