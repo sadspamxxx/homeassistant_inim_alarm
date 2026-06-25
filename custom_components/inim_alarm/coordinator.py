@@ -399,11 +399,18 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         has_changes = False
         for device in self.data.get("devices", []):
             for idx, zone in enumerate(device.get("zones", [])):
-                if zone.get("ZoneId") == zone_id:
+                z_id = zone.get("ZoneId")
+                
+                # Ignora le zone senza ID
+                if z_id is None:
+                    continue
+                
+                # Handle INIM Cloud 1000 offset for wireless and double zones
+                if z_id == zone_id or z_id % 1000 == zone_id:
                     device["zones"][idx].update(status_update)
                     has_changes = True
                     _LOGGER.debug(
-                        "SIA update zone %s: %s", zone.get("Name", zone_id), status_update
+                        "SIA update zone %s: %s", zone.get("Name", z_id), status_update
                     )
                     break
             if has_changes:
