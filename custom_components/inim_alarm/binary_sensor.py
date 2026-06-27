@@ -210,7 +210,7 @@ class InimZoneAlarmMemoryBinarySensor(
     """Representation of an INIM zone alarm memory binary sensor."""
 
     _attr_has_entity_name = True
-    _attr_device_class = BinarySensorDeviceClass.SAFETY
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
     def __init__(
         self,
