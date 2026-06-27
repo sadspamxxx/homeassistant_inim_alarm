@@ -21,8 +21,12 @@ from .const import (
     ATTR_DEVICE_ID,
     ATTR_TAMPER_MEMORY,
     ATTR_ZONE_ID,
+    CONF_ZONE_ALARM_MEMORY_EXPOSURE,
+    DEFAULT_ZONE_ALARM_MEMORY_EXPOSURE,
     DOMAIN,
     MANUFACTURER,
+    ZONE_ALARM_MEMORY_EXPOSURE_BINARY_SENSOR,
+    ZONE_ALARM_MEMORY_EXPOSURE_BOTH,
     ZONE_STATUS_CLOSED,
 )
 from .coordinator import InimDataUpdateCoordinator
@@ -70,6 +74,18 @@ def _is_zone_output(zone: dict[str, Any]) -> bool:
     return zone.get("Type") == 4
 
 
+def _expose_alarm_memory_binary_sensors(options: dict[str, Any]) -> bool:
+    """Return true when alarm memories should be exposed as binary sensors."""
+    exposure = options.get(
+        CONF_ZONE_ALARM_MEMORY_EXPOSURE,
+        DEFAULT_ZONE_ALARM_MEMORY_EXPOSURE,
+    )
+    return exposure in (
+        ZONE_ALARM_MEMORY_EXPOSURE_BINARY_SENSOR,
+        ZONE_ALARM_MEMORY_EXPOSURE_BOTH,
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -78,6 +94,8 @@ async def async_setup_entry(
     """Set up INIM binary sensors from a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator: InimDataUpdateCoordinator = data["coordinator"]
+    options: dict[str, Any] = data.get("options", {})
+    expose_alarm_memory = _expose_alarm_memory_binary_sensors(options)
 
     entities = []
     
@@ -106,7 +124,7 @@ async def async_setup_entry(
                     zone_name=zone_name,
                 )
             )
-            if not _is_zone_output(zone):
+            if expose_alarm_memory and not _is_zone_output(zone):
                 entities.append(
                     InimZoneAlarmMemoryBinarySensor(
                         coordinator=coordinator,
