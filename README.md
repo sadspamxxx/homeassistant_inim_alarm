@@ -8,6 +8,50 @@
 
 A Home Assistant custom integration for INIM alarm systems (SmartLiving, Prime, etc.) via INIM Cloud, with optional local real-time updates.
 
+## Fork status
+
+This repository is a personal fork of [`pla10/homeassistant_inim_alarm`](https://github.com/pla10/homeassistant_inim_alarm).
+
+It is based on upstream `pla10/main` commit:
+
+```text
+b031020de236017417002f63242766b30560cf73
+```
+
+The goal of this fork is to test and submit improvements upstream while keeping a working version for local INIM Prime / Home Assistant / HomeKit use.
+
+### Changes developed in this fork / submitted upstream
+
+- [PR #15](https://github.com/pla10/homeassistant_inim_alarm/pull/15) — **Support INIM double-zone SIA-IP mapping**
+  - Adds support for INIM double-zone / secondary-channel SIA-IP mappings.
+  - Keeps the existing exact `ZoneId` match first, then tries fallback candidates for double-zone events.
+  - Tested with standard and double-zone SIA-IP events such as `BA1`, `BR1`, `BA20`, `BR20`, `BA2002`, `BR2002`, etc.
+
+- [PR #17](https://github.com/pla10/homeassistant_inim_alarm/pull/17) — **Stabilize alarm area states after scenario changes**
+  - Improves area state handling after scenario changes from Home Assistant/HomeKit, INIM app, SIA-IP, or WebSocket.
+  - Applies expected area states from scenario `AreaSet` after HA scenario commands.
+  - Detects external `ActiveScenario` changes from cloud polling.
+  - Ignores stale realtime area updates that contradict a recent scenario state.
+  - Debounces SIA/WebSocket area `Armed` updates so Home Assistant receives one stable state instead of partial area-by-area transitions.
+  - Infers `armed_home` / `armed_away` from the active configured scenario.
+
+- [PR #18](https://github.com/pla10/homeassistant_inim_alarm/pull/18) — **Add per-zone alarm memory binary sensors**
+  - Adds a second binary sensor for each visible alarm zone to expose the zone `AlarmMemory` flag as a real entity.
+  - Keeps the normal zone open/closed binary sensors unchanged.
+  - Creates entities named `Allarme <zone name>` for per-zone alarm memory.
+  - Useful for dashboards, automations, and HomeKit Bridge setups that need to know exactly which zone caused an alarm.
+  - Skips output/relay-style zones where possible.
+
+- [PR #19](https://github.com/pla10/homeassistant_inim_alarm/pull/19) — **Add configurable zone alarm memory exposure modes**
+  - Adds `zone_alarm_memory_exposure` integration option.
+  - Available modes: `Disabled`, `Safety binary sensors`, `Read-only alarm panels`, `Both`.
+  - Adds optional read-only per-zone `alarm_control_panel` entities backed by `AlarmMemory`.
+  - Read-only alarm panels expose `AlarmMemory == false` as `disarmed` and `AlarmMemory == true` as `triggered`.
+  - Intended especially for HomeKit, where alarm panel entities produce security-style important notifications with the zone name.
+  - Adds `excluded_alarm_memory_zones` so users can manually exclude relays, outputs, lights, heating, door-release outputs, or any other zones they do not want exposed as alarm memory entities.
+
+> Note: some changes may live on feature branches until they are merged upstream or into this fork's `main` branch.
+
 ## ✨ Features
 
 - 🔐 **Alarm Control Panel** - Arm/disarm all areas at once
@@ -66,7 +110,7 @@ This integration works with INIM alarm panels connected to INIM Cloud:
 1. Open HACS in Home Assistant
 2. Click on "Integrations"
 3. Click the three dots menu (⋮) → "Custom repositories"
-4. Add repository URL: `https://github.com/pla10/homeassistant_inim_alarm`
+4. Add repository URL: `https://github.com/sadspamxxx/homeassistant_inim_alarm`
 5. Select category: "Integration" → Click "Add"
 6. Search for "INIM Alarm" and click "Download"
 7. Restart Home Assistant
@@ -74,10 +118,9 @@ This integration works with INIM alarm panels connected to INIM Cloud:
 
 ### Manual Installation
 
-1. Download the latest release from [GitHub Releases](https://github.com/pla10/homeassistant_inim_alarm/releases)
-2. Extract `inim_alarm.zip`
-3. Copy the contents to `config/custom_components/inim_alarm/`
-4. Restart Home Assistant
+1. Download this repository or the branch you want to test
+2. Copy the contents of `custom_components/inim_alarm/` to `config/custom_components/inim_alarm/`
+3. Restart Home Assistant
 
 ## ⚙️ Configuration
 
@@ -335,6 +378,7 @@ MIT License - see [LICENSE](LICENSE)
 
 ## 👏 Credits
 
-- Developed by [Placido Falqueto](https://github.com/pla10)
+- Original project developed by [Placido Falqueto](https://github.com/pla10)
+- Fork maintained by [@sadspamxxx](https://github.com/sadspamxxx) for local testing and upstream pull requests
 - Thanks to [@thekoma](https://github.com/thekoma) for WebSocket improvements and SIA-IP concept
 - Thanks to the Home Assistant community
