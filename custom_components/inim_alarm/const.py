@@ -18,6 +18,7 @@ CONF_DISARM_SCENARIO = "disarm_scenario"
 CONF_USER_CODE = "user_code"
 CONF_AWAY_ONLY_AREAS = "away_only_areas"
 CONF_ZONE_ALARM_MEMORY_EXPOSURE = "zone_alarm_memory_exposure"
+CONF_EXCLUDED_ALARM_MEMORY_ZONES = "excluded_alarm_memory_zones"
 
 ZONE_ALARM_MEMORY_EXPOSURE_DISABLED = "disabled"
 ZONE_ALARM_MEMORY_EXPOSURE_BINARY_SENSOR = "binary_sensor"
