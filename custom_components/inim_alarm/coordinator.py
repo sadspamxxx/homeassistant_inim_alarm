@@ -73,7 +73,8 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     except InimAuthError as err:
                         _LOGGER.debug(
                             "RequestPoll auth error for device %s: %s, token was refreshed",
-                            device_id, err,
+                            device_id,
+                            err,
                         )
                         # Token was refreshed inside request_poll, retry once
                         try:
@@ -84,26 +85,26 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             _LOGGER.warning("RequestPoll retry failed for device %s: %s", device_id, retry_err)
                     except Exception as err:
                         _LOGGER.debug("RequestPoll failed for device %s: %s", device_id, err)
-            
+
             # Wait for central to send data to cloud (5 seconds required)
             if poll_requested:
                 import asyncio
                 await asyncio.sleep(5)
-            
+
             # Now get devices with all data (should have fresh state)
             devices = await self.api.get_devices()
-            
+
             if not devices:
                 _LOGGER.warning("No devices found in INIM Cloud")
                 return {"devices": []}
-            
+
             self._devices = devices
-            
+
             # Build a structured data response
             data: dict[str, Any] = {
                 "devices": [],
             }
-            
+
             for device in devices:
                 device_data = {
                     "device_id": device.get("DeviceId"),
@@ -123,12 +124,12 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "blinds": device.get("Blinds", []),
                 }
                 data["devices"].append(device_data)
-            
+
             _LOGGER.debug("Updated data for %d devices", len(data["devices"]))
-            
+
             # Check for alarm state changes and fire events
             self._check_alarm_triggered(data)
-            
+
             return data
 
         except InimAuthError as err:
@@ -196,17 +197,17 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             device_id = device.get("device_id")
             if not device_id:
                 continue
-            
+
             for area in device.get("areas", []):
                 area_id = area.get("AreaId")
                 area_name = area.get("Name", f"Area {area_id}")
                 current_alarm = area.get("Alarm", False)
                 current_armed = area.get("Armed", 4)  # 4 = disarmed
-                
+
                 key = (device_id, area_id)
                 previous_alarm = self._previous_alarm_states.get(key, False)
                 previous_armed = self._previous_armed_states.get(key)
-                
+
                 # Fire event if alarm just triggered (false -> true)
                 if current_alarm and not previous_alarm:
                     _LOGGER.warning(
@@ -222,15 +223,15 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "area_name": area_name,
                         },
                     )
-                
+
                 # Check for armed state changes and determine source
                 if previous_armed is not None and current_armed != previous_armed:
                     self._handle_armed_state_change(
-                        device_id, area_id, area_name, 
+                        device_id, area_id, area_name,
                         device.get("name", "INIM Alarm"),
                         previous_armed, current_armed
                     )
-                
+
                 # Update state tracking
                 self._previous_alarm_states[key] = current_alarm
                 self._previous_armed_states[key] = current_armed
@@ -246,48 +247,48 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> None:
         """Handle armed state change and determine source."""
         now = dt_util.now()
-        
+
         # Check if we have a pending HA command for this area
         entity_key_area = f"{device_id}_area_{area_id}"
         entity_key_main = f"{device_id}_alarm"
-        
+
         pending_key_area = (device_id, area_id)
         pending_key_main = (device_id, None)
-        
+
         # Check if there's a pending HA command (within last 60 seconds)
         is_ha_command = False
         pending_time = None
-        
+
         if pending_key_area in self._pending_ha_commands:
             pending_time = self._pending_ha_commands[pending_key_area]
             if (now - pending_time).total_seconds() < 60:
                 is_ha_command = True
                 del self._pending_ha_commands[pending_key_area]
-        
+
         if not is_ha_command and pending_key_main in self._pending_ha_commands:
             pending_time = self._pending_ha_commands[pending_key_main]
             if (now - pending_time).total_seconds() < 60:
                 is_ha_command = True
                 # Don't delete main panel pending - it might apply to multiple areas
-        
+
         # Determine the source - if HA command pending, it's from HA
         changed_by = CHANGED_BY_HOME_ASSISTANT if is_ha_command else CHANGED_BY_EXTERNAL
-        
+
         # Store change info for both area and main panel entities
         self._last_changed_by[entity_key_area] = changed_by
         self._last_changed_at[entity_key_area] = now
         self._last_changed_by[entity_key_main] = changed_by
         self._last_changed_at[entity_key_main] = now
-        
+
         # Determine state names for logging
         state_from = "armed" if previous_armed != 4 else "disarmed"
         state_to = "armed" if current_armed != 4 else "disarmed"
-        
+
         _LOGGER.info(
             "Alarm state changed: %s -> %s (Area: %s, Device: %s, Source: %s)",
             state_from, state_to, area_name, device_name, changed_by
         )
-        
+
         # Fire event
         self.hass.bus.async_fire(
             EVENT_STATE_CHANGED,
@@ -305,7 +306,7 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def register_ha_command(self, device_id: int, area_id: int | None = None) -> None:
         """Register that a command was sent from Home Assistant.
-        
+
         Args:
             device_id: The device ID
             area_id: The area ID (None for main panel affecting all areas)
@@ -390,6 +391,115 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._check_alarm_triggered(self.data)
             self.async_set_updated_data(self.data)
 
+    def _coerce_int(self, value: Any) -> int | None:
+        """Return value as int, or None when unset/invalid."""
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _zone_area_ids_from_mask(self, zone_areas: Any) -> set[int]:
+        """Return zero-based area IDs from a zone Areas bitmask."""
+        mask = self._coerce_int(zone_areas)
+        if mask is None or mask <= 0:
+            return set()
+
+        area_ids: set[int] = set()
+        bit = 1
+        area_id = 0
+
+        while bit <= mask:
+            if mask & bit:
+                area_ids.add(area_id)
+            bit <<= 1
+            area_id += 1
+
+        return area_ids
+
+    def _active_scenario(self, device: dict[str, Any]) -> dict[str, Any] | None:
+        """Return active scenario object for a device."""
+        active_scenario_id = self._coerce_int(device.get("active_scenario"))
+        if active_scenario_id is None:
+            return None
+
+        for scenario in device.get("scenarios", []):
+            if self._coerce_int(scenario.get("ScenarioId")) == active_scenario_id:
+                return scenario
+
+        return None
+
+    def _scenario_armed_area_ids(self, scenario: dict[str, Any]) -> set[int]:
+        """Return zero-based area IDs armed by a scenario AreaSet.
+
+        INIM AreaSet observed values:
+        1 = area armed by the scenario
+        4 = area disarmed by the scenario
+        0 = unused/not relevant
+        """
+        area_set = str(scenario.get("AreaSet", ""))
+        armed_area_ids: set[int] = set()
+
+        for area_id, value in enumerate(area_set):
+            if value == "1":
+                armed_area_ids.add(area_id)
+
+        return armed_area_ids
+
+    def _should_set_alarm_memory_from_sia(
+        self,
+        device: dict[str, Any],
+        zone: dict[str, Any],
+    ) -> bool:
+        """Return true when a SIA zone event should create AlarmMemory.
+
+        Use active scenario + AreaSet instead of the current area Armed field,
+        because area Armed states can be stale or inconsistent during fast
+        scenario changes.
+        """
+        scenario = self._active_scenario(device)
+        if not scenario:
+            _LOGGER.debug("SIA AlarmMemory skipped: no active scenario for device")
+            return False
+
+        armed_area_ids = self._scenario_armed_area_ids(scenario)
+
+        # Disarm / Clean Memory scenarios have no armed areas in AreaSet.
+        if not armed_area_ids:
+            _LOGGER.debug(
+                "SIA AlarmMemory skipped: active scenario %s arms no areas",
+                scenario.get("Name"),
+            )
+            return False
+
+        zone_area_ids = self._zone_area_ids_from_mask(zone.get("Areas"))
+
+        # If the zone has a readable Areas mask, only set memory when the active
+        # scenario arms at least one of the zone's areas.
+        if zone_area_ids:
+            should_set = bool(zone_area_ids & armed_area_ids)
+            _LOGGER.debug(
+                "SIA AlarmMemory decision for zone %s: scenario=%s zone_areas=%s "
+                "armed_areas=%s should_set=%s",
+                zone.get("Name", zone.get("ZoneId")),
+                scenario.get("Name"),
+                sorted(zone_area_ids),
+                sorted(armed_area_ids),
+                should_set,
+            )
+            return should_set
+
+        # Conservative fallback: if the scenario arms something but the zone has
+        # no readable Areas mask, do not risk missing a real alarm.
+        _LOGGER.debug(
+            "SIA AlarmMemory fallback true for zone %s: scenario=%s has armed areas "
+            "but zone Areas mask is unreadable",
+            zone.get("Name", zone.get("ZoneId")),
+            scenario.get("Name"),
+        )
+        return True
+
     @callback
     def async_on_sia_update(self, zone_id: int, status_update: dict[str, Any]) -> None:
         """Handle real-time zone updates from SIA-IP."""
@@ -400,17 +510,29 @@ class InimDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for device in self.data.get("devices", []):
             for idx, zone in enumerate(device.get("zones", [])):
                 z_id = zone.get("ZoneId")
-                
+
                 # Ignora le zone senza ID
                 if z_id is None:
                     continue
-                
+
                 # Handle INIM Cloud 1000 offset for wireless and double zones
                 if z_id == zone_id or z_id % 1000 == zone_id:
-                    device["zones"][idx].update(status_update)
+                    update = dict(status_update)
+                    alarm_memory_if_scenario_arms_zone = update.pop(
+                        "_alarm_memory_if_scenario_arms_zone",
+                        False,
+                    )
+
+                    if alarm_memory_if_scenario_arms_zone and self._should_set_alarm_memory_from_sia(
+                        device,
+                        zone,
+                    ):
+                        update["AlarmMemory"] = True
+
+                    device["zones"][idx].update(update)
                     has_changes = True
                     _LOGGER.debug(
-                        "SIA update zone %s: %s", zone.get("Name", z_id), status_update
+                        "SIA update zone %s: %s", zone.get("Name", z_id), update
                     )
                     break
             if has_changes:
